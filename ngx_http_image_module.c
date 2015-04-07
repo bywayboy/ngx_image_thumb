@@ -87,11 +87,7 @@ typedef struct
 	int water_font_size;//水印文字大小
 	ngx_str_t water_font;//文字水印字体文件路径
 	ngx_str_t water_color;//水印文字颜色 (#0000000)
-#if defined(DEBUG_CONSILE_TEST)
-	pcre * regx_expr;
-#else
 	ngx_regex_t * regx_expr;
-#endif
 } ngx_image_conf_t;
 
 typedef struct {
@@ -137,11 +133,6 @@ typedef struct {
 
 static FILE *curl_handle;
 
-#if defined(DEBUG_CONSILE_TEST)
-	const char REQUEST_URI_CONST[] = "test/7.jpg!w800x600.png";
-	#define  ngx_alloc(a, b) malloc(a)
-	#define ngx_free( x )	free( x )
-#endif
 static ngx_str_t  ngx_http_image_types[] =
 {
         ngx_string("text/html"),
@@ -179,34 +170,6 @@ static void get_request_source(void *conf);
 static int dirname(char *path,char **dirpath);//根据URL获取目录路径
 static void download(ngx_image_thumb_context_t * ctx);//下载文件
 
-#if defined(DEBUG_CONSILE_TEST)
-ngx_int_t ngx_http_discard_request_body(ngx_http_request_t *r){
-	return NGX_OK;
-}
-u_char *ngx_http_map_uri_to_path(ngx_http_request_t *r, ngx_str_t *name, size_t *root_length, size_t reserved)
-{
-	name->len = sizeof("d:/site/pay/test/7.jpg!w800x600.jpg");
-	name->data = (u_char *)"d:/site/pay/test/7.jpg!w800x600.jpg";
-	*root_length = sizeof("d:/site/pay/")-1;
-	return (u_char *)1;
-}
-static ngx_int_t output(ngx_http_request_t *r,void *conf,ngx_str_t type){
-	return NGX_OK;
-}
-
-static void log_error(int a, ngx_log_t * log, int b, const char * fmt,...){
-	va_list ap;
-//	va_start(ap, fmt);
-//	vprintf(fmt, ap);
-//	va_end(ap);
-	puts("");
-}
-
-#else
-	#define log_error ngx_log_error
-
-#endif
-#if !defined(DEBUG_CONSILE_TEST)
 static ngx_command_t  ngx_http_image_commands[] =
 {
 	{
@@ -365,7 +328,7 @@ ngx_module_t  ngx_http_image_module =
 		NULL,                          // exit master 
 		NGX_MODULE_V1_PADDING
 };
-#endif
+
 
 
 static void * ngx_http_image_create_loc_conf(ngx_conf_t *cf)
@@ -393,6 +356,7 @@ static void * ngx_http_image_create_loc_conf(ngx_conf_t *cf)
 static char * ngx_http_image_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 {
 	ngx_regex_compile_t   rc;
+	ngx_pool_cleanup_t * cln;
 	u_char                errstr[NGX_MAX_CONF_ERRSTR];
 
 	ngx_image_conf_t  * prev = (ngx_image_conf_t  *)parent;
@@ -425,7 +389,6 @@ static char * ngx_http_image_merge_loc_conf(ngx_conf_t *cf, void *parent, void *
 		return NGX_CONF_ERROR;
 	}
 	conf->regx_expr = rc.regex;
-
 	return NGX_CONF_OK;
 }
 
@@ -437,29 +400,10 @@ static ngx_int_t ngx_http_image_handler(ngx_http_request_t *r)
 	ngx_int_t                  rc;
 	u_char					*  request_uri;
 	int						   request_uri_len;
-	ngx_image_conf_t  *conf;
 
-#if !defined(DEBUG_CONSILE_TEST)
 	ngx_image_thumb_context_t * ctx = (ngx_image_thumb_context_t *)ngx_pcalloc(r->pool, sizeof(ngx_image_thumb_context_t));
-	ctx->conf = conf = ngx_http_get_module_loc_conf(r, ngx_http_image_module);
+	ctx->conf = (ngx_image_conf_t *)ngx_http_get_module_loc_conf(r, ngx_http_image_module);
 	ctx->r = r;
-#else
-	//TODO
-	char * error;int erroffset;
-	ngx_image_thumb_context_t lctx, * ctx = &lctx;
-	static ngx_image_conf_t cnf;
-	cnf.water_status =1;
-	cnf.water_image.len = sizeof("d:/site/pay/test/7.jpg") -1;
-	cnf.water_image.data = "d:/site/pay/test/7.jpg";
-	cnf.backend = 1;
-	cnf.backend_server.data="http://news.baidu.com";
-	cnf.backend_server.len = sizeof("http://news.baidu.com") -1;
-	
-	ctx->conf = conf = &cnf;
-	cnf.image_output = 1;
-	ctx->r = r;
-	cnf.regx_expr = pcre_compile((const char *)"([^<]*)\\/([^<]*)!([a-z])(\\d{2,4})x(\\d{2,4}).([a-zA-Z]{3,4})",0,&error,&erroffset,NULL);
-#endif
 
 	if (!(r->method & (NGX_HTTP_GET|NGX_HTTP_HEAD)))
 	{
@@ -504,15 +448,14 @@ static ngx_int_t ngx_http_image_handler(ngx_http_request_t *r)
 		{
 			if (parse_image_info(ctx) == 0)//解析并处理请求的图片URL
 			{
-				log_error(NGX_LOG_EMERG, r->connection->log, 0, "LOG: FUCK FUCK FUCK!");
 				make_thumb(ctx);//生成图片缩略图
 				water_mark(ctx);//图片打上水印
 				thumb_to_string(ctx);//GD对象转换成二进制字符串
-				if(conf->image_output == 0)
+				if(ctx->conf->image_output == 0)
 				{
 					write_img(ctx);//保存图片缩略图到文件
 				}
-				if(conf->image_output == 1)
+				if(ctx->conf->image_output == 1)
 				{
 					ngx_free(request_uri);
 					return output(r, ctx, ngx_http_image_types[ctx->dest_type]);
@@ -524,7 +467,7 @@ static ngx_int_t ngx_http_image_handler(ngx_http_request_t *r)
 	return NGX_DECLINED;
 }
 
-static char * ngx_http_image_water_min(ngx_conf_t *cf, ngx_command_t *cmd,void *conf)
+static char * ngx_http_image_water_min(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
 	ngx_image_conf_t *info = conf;
 	ngx_str_t                         *value;
@@ -573,11 +516,8 @@ char * ngx_conf_set_number_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 		return "is duplicate";
 	}
 	value = cf->args->elts;
-#if !defined(DEBUG_CONSILE_TEST)
 	*np = (int)ngx_atoi(value[1].data, value[1].len);
-#else
-	*np = (int)atoi(value[1].data);
-#endif
+
 	if (*np == NGX_ERROR)
 	{
 		return "invalid number";
@@ -609,7 +549,6 @@ static char *
 	return NGX_CONF_OK;
 }
 
-#if !defined(DEBUG_CONSILE_TEST)
 static ngx_int_t output(ngx_http_request_t *r, ngx_image_thumb_context_t  * ctx,ngx_str_t type)
 {
     ngx_int_t status = 0;
@@ -626,11 +565,10 @@ static ngx_int_t output(ngx_http_request_t *r, ngx_image_thumb_context_t  * ctx,
 	ngx_memzero(&cv, sizeof(ngx_http_complex_value_t));
 	cv.value.len = ctx->img_size;
 	cv.value.data = (u_char *)ctx->img_data;
-	log_error(NGX_LOG_EMERG, r->connection->log, 0, "OUTPUT: %d, %d",ctx->img_data, ctx->img_size);
     status = ngx_http_send_response(r, NGX_HTTP_OK, &type, &cv);
     return status;
 }
-#endif
+
 
 static void thumb_to_string(ngx_image_thumb_context_t * ctx)
 {
@@ -656,15 +594,8 @@ static void thumb_to_string(ngx_image_thumb_context_t * ctx)
 }
 
 static void gd_clean_data(void *data){
-	FILE * fp = fopen("D:\\log.txt", "a+");
 	if(NULL != data)
-	{
 		gdFree(data);
-		if(NULL != fp){
-			fprintf(fp,"FREE GD DATA %X\n", data);
-			fclose(fp);
-		}
-	}
 }
 
 static void make_thumb(ngx_image_thumb_context_t  * ctx)
@@ -868,11 +799,7 @@ static int parse_image_info(ngx_image_thumb_context_t * ctx)
 	ngx_image_conf_t *info = ctx->conf;
 	ctx->request_filename = NULL;
 
-#if defined(DEBUG_CONSILE_TEST)
-	expr_res = pcre_exec(ctx->conf->regx_expr,NULL,(const char *)ctx->dest_file.data, ctx->dest_file.len-1,0,0,ovector,sizeof(ovector)/sizeof(ovector[0]));
-#else
 	expr_res = ngx_regex_exec(ctx->conf->regx_expr, &ctx->dest_file,ovector, sizeof(ovector)/sizeof(ovector[0]));
-#endif
 
 	if(expr_res > 5)
 	{
@@ -1364,34 +1291,3 @@ static void download(ngx_image_thumb_context_t * ctx)
 	}
 }
 
-
-
-
-#if defined(DEBUG_CONSILE_TEST)
-
-int main(int argc, char * argv[])
-{
-	pcre *expr;//正则
-	ngx_connection_t  ngx_conn;
-	const char *error;int erroffset;//正则错误位置
-	ngx_http_request_t req;
-	req.http_version = NGX_HTTP_VERSION_11;
-	req.request_line.len = sizeof("GET /");
-	req.request_line.data = "GET /";
-	req.headers_in.if_modified_since= 0;
-	
-	req.method=NGX_HTTP_GET;
-	req.uri_start = req.uri.data=REQUEST_URI_CONST;
-	req.uri.len = sizeof(REQUEST_URI_CONST);
-	req.uri_end = req.uri_start + sizeof(REQUEST_URI_CONST)-1;
-	ngx_conn.log = NULL;
-	req.connection = &ngx_conn;
-	//req.
-
-	ngx_http_image_handler(&req);
-	_CrtDumpMemoryLeaks();
-
-	return 0;
-}
-
-#endif
